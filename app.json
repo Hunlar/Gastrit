@@ -2,7 +2,7 @@
   "name": "UlkeSavasBot",
   "description": "Telegram ülke savaşı temalı oyun botu",
   "repository": "https://github.com/Hunlar/Gastrit",
-  "stack": "heroku-20",
+  "stack": "heroku-22",
   "env": {
     "BOT_TOKEN": {
       "description": "Telegram Bot Token (botun tokenini buraya ekle)",
