@@ -7,9 +7,8 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
 )
-from game_manager import GameManager  # Oyun mantığı ayrı dosyada
+from game_manager import GameManager
 
-# Ortam değişkenlerini yükle (.env varsa)
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
 
@@ -65,22 +64,27 @@ async def savas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         await update.message.reply_text("Oyun sadece grup sohbetinde başlatılabilir.")
         return
+
     started = game_manager.start_game(chat_id)
     if not started:
         await update.message.reply_text("Zaten bir oyun başlatılmış.")
         return
+
+    keyboard = [
+        [InlineKeyboardButton("Katıl", url=f"https://t.me/{context.bot.username}?start=katil")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_animation(
         animation="https://media4.giphy.com/media/14p5u4rpoC9Rm0/giphy.gif",
-        caption="Oyun başladı! Katılmak için aşağıdaki butona tıklayın."
+        caption="Oyun başladı! Katılmak için aşağıdaki butona tıklayın.",
+        reply_markup=reply_markup
     )
 
 async def katil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         await update.message.reply_text("Lütfen özelden katılmak için tıklayın.")
         return
-
-    # PM'de katılım - kullanıcının hangi gruptan geldiğini anlamak için mesaj üzerinden alınamaz
-    # Kullanıcı önce grupta start verir, ardından PM üzerinden bot yönlendirmeli olur
 
     user = update.effective_user
     success = game_manager.add_player_to_latest_game(user.id, user.first_name)
@@ -136,7 +140,6 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler, pattern="^(commands|about)$"))
     app.add_handler(CallbackQueryHandler(callback_game))
 
-    # Bilinmeyen komutlar
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
     app.run_polling()
