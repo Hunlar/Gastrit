@@ -1,0 +1,92 @@
+[
+  {
+    "name": "Osmanlı İmparatorluğu",
+    "power": "Her 2 oylamada bir istediği ülkeyi saf dışı bırakabilir.",
+    "gif": "https://media.giphy.com/media/gFiY5QBLqvrx2/giphy.gif"
+  },
+  {
+    "name": "German İmparatorluğu",
+    "power": "2 oylamada bir kaos çıkarır, sadece kendisi oy kullanabilir.",
+    "gif": "https://media.giphy.com/media/5xaOcLGvzHxDKjufnLW/giphy.gif"
+  },
+  {
+    "name": "Britanya İmparatorluğu",
+    "power": "Bir ülkenin oy tercihlerini manipüle eder.",
+    "gif": "https://media.giphy.com/media/fxsqOYnIMEefC/giphy.gif"
+  },
+  {
+    "name": "Pembe Dünya (Renkli Dünya / PDM)",
+    "power": "Götümüz başımız ayrı oynuyor! Her tur meydan okur.",
+    "gif": "https://media.giphy.com/media/13gvXfEVlxQjDO/giphy.gif"
+  },
+  {
+    "name": "Rusya Federasyonu",
+    "power": "Bir ülkenin oy kullanmasını 1 tur engelleyebilir.",
+    "gif": "https://media.giphy.com/media/YQitE4YNQNahy/giphy.gif"
+  },
+  {
+    "name": "ABD (Amerika)",
+    "power": "1 ülkeyi 1 tur dokunulmaz yapar (kendisi dışında).",
+    "gif": "https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif"
+  },
+  {
+    "name": "Fransa",
+    "power": "Oyların 2 kat sayılmasını sağlar (sadece kendi oyu).",
+    "gif": "https://media.giphy.com/media/l0MYDGA3Du1hBRzzy/giphy.gif"
+  },
+  {
+    "name": "Çin Halk Cumhuriyeti",
+    "power": "Oylama sonuçlarını tersine çevirebilir (1 kez).",
+    "gif": "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif"
+  },
+  {
+    "name": "İran",
+    "power": "Gizli oy kullanır. Kimse kime oy verdiğini bilemez.",
+    "gif": "https://media.giphy.com/media/k7VVlKoZFkHG8/giphy.gif"
+  },
+  {
+    "name": "İsrail",
+    "power": "Herhangi bir turda 2 kişiye oy verebilir.",
+    "gif": "https://media.giphy.com/media/k7VVlKoZFkHG8/giphy.gif"
+  },
+  {
+    "name": "Türkiye",
+    "power": "Her 3 turda bir, oylamaya katılan herkesi ifşa eder.",
+    "gif": "https://media.giphy.com/media/14p5u4rpoC9Rm0/giphy.gif"
+  },
+  {
+    "name": "Kuzey Kore",
+    "power": "Kendisini 1 tur görünmez yapar. Oy almaz, oy da veremez.",
+    "gif": "https://media.giphy.com/media/R9zXH9MdGJg7e/giphy.gif"
+  },
+  {
+    "name": "Japonya",
+    "power": "Rastgele bir ülkenin özel gücünü bir kez kopyalayabilir.",
+    "gif": "https://media.giphy.com/media/8FenWQk1ntSMLtB8Nz/giphy.gif"
+  },
+  {
+    "name": "Hindistan",
+    "power": "1 ülkenin özel gücünü 1 tur engelleyebilir.",
+    "gif": "https://media.giphy.com/media/WUlplcMpOCEmTGBtBW/giphy.gif"
+  },
+  {
+    "name": "Meksika",
+    "power": "Elenen bir ülkeyi 1 kez oyuna geri döndürebilir.",
+    "gif": "https://media.giphy.com/media/xT0BKiaM2VGJHf9Fba/giphy.gif"
+  },
+  {
+    "name": "İtalya",
+    "power": "Aynı oyu 2 kez kullanabilir (aynı hedefe 2 oy verir).",
+    "gif": "https://media.giphy.com/media/YTbZzCkRQCEJa/giphy.gif"
+  },
+  {
+    "name": "Brezilya",
+    "power": "Kendisini her 4 turda bir koruyabilir.",
+    "gif": "https://media.giphy.com/media/xT0BKiaM2VGJHf9Fba/giphy.gif"
+  },
+  {
+    "name": "Ukrayna",
+    "power": "Kimin hangi ülke olduğunu açığa çıkarabilir (1 kez).",
+    "gif": "https://media.giphy.com/media/14p5u4rpoC9Rm0/giphy.gif"
+  }
+]
