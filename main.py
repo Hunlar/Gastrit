@@ -1,15 +1,20 @@
+import os
 import json
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 )
-from game_manager import GameManager  # Ayrı dosyada oyun mekanikleri burada
+from game_manager import GameManager  # Oyun mekanikleri burada
 
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = "YOUR_BOT_TOKEN_HERE"
+# Token'ı ortam değişkeninden alıyoruz (Heroku Config Vars içinde TOKEN olarak tanımlı olmalı)
+TOKEN = os.getenv("TOKEN")
+if not TOKEN:
+    raise ValueError("Bot token'ı ortam değişkeni olarak ayarlanmamış! Lütfen TOKEN olarak tanımlayın.")
 
+# Roller dosyasını yükle
 with open("roles.json", "r", encoding="utf-8") as f:
     ROLES = json.load(f)
 
@@ -30,30 +35,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Zeyd Bin Sabr", url="https://t.me/ZeydBinhalit")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    # GIF'i ayrı mesaj olarak gönder
-    await update.message.reply_animation(gif_url)
-    await update.message.reply_text(start_text, reply_markup=reply_markup)
+    await update.message.reply_animation(gif_url, caption=start_text, reply_markup=reply_markup)
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    data = query.data
     await query.answer()
+    data = query.data
 
     if data == "commands":
         commands_text = (
             "/start : Botu başlatır\n"
             "/savas : Grupta oyunu başlatır\n"
-            "/baslat : Katılımcılar tamamlandıktan sonra oyunu başlatır\n"
+            "/baslat : Oyunu başlatır (yönetici komutu)\n"
             "/baris : Oyunu sonlandırır\n"
             "/roles : Oyundaki ülkeleri listeler\n"
         )
-        await query.message.reply_text(commands_text)
+        await query.edit_message_text(commands_text)
     elif data == "about":
         about_text = (
             "Bu oyun bir dünya savaşı simülasyonudur. Siz devlet başkanı sıfatıyla halkınızı "
             "nasıl yönlendireceksiniz onu görmek için yapılmıştır."
         )
-        await query.message.reply_text(about_text)
+        await query.edit_message_text(about_text)
 
 async def savas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -65,47 +68,48 @@ async def savas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Oyun zaten başladı.")
         return
     await update.message.reply_text(
-        "Oyun başladı! Katılmak için /katil yazın.\n\n"
+        "Oyun başladı! Oyuna katılmak için botun özel mesajına gidip /katil yazınız.\n\n"
         "Katılım süresi 2 dakikadır."
     )
 
 async def baslat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    user = update.effective_user
     if update.effective_chat.type == "private":
-        await update.message.reply_text("Oyun grup sohbetinde başlatılabilir.")
+        await update.message.reply_text("Bu komut sadece grup sohbetinde kullanılabilir.")
         return
-    success = game_manager.begin_game(chat_id)
-    if success:
-        await update.message.reply_text("Oyun başladı! İyi savaşlar!")
+    # Yönetici kontrolü yapılabilir (opsiyonel)
+    if not await is_user_admin(update, context, user.id):
+        await update.message.reply_text("Bu komutu yalnızca grup yöneticileri kullanabilir.")
+        return
+    started = game_manager.begin_game(chat_id)
+    if started:
+        await update.message.reply_text("Oyun resmen başladı! Güçlerinizi kullanabilirsiniz.")
     else:
-        await update.message.reply_text("Oyun başlatılamadı. Lütfen önce oyuncuların katıldığından emin olun.")
+        await update.message.reply_text("Oyunu başlatmak için yeterli katılım yok ya da oyun zaten başladı.")
 
 async def katil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = update.effective_user
     if update.effective_chat.type != "private":
-        await update.message.reply_text("Lütfen oyuna katılmak için özelden bu komutu kullan.")
+        await update.message.reply_text("Lütfen oyuna katılmak için bu komutu botun özel mesajında kullanın.")
         return
-    added = game_manager.add_player(chat_id, user.id, user.first_name)
+    # Burada oyun hangi grupta açık bilmiyoruz, game_manager bunu tutuyor olmalı
+    added = game_manager.add_player_to_current_game(user.id, user.first_name)
     if added:
         await update.message.reply_text(f"{user.first_name}, oyuna katıldınız!")
-        # Grup sohbetine bildirim gönder
-        for group_id in game_manager.active_games.keys():
-            try:
-                await context.bot.send_message(group_id, f"{user.first_name} oyuna katıldı!")
-            except Exception:
-                pass
+        # Katıldığı gruba bildirim göndermek için game_manager ile entegre edilebilir
     else:
         await update.message.reply_text("Zaten oyundasınız veya oyun başlamış olabilir.")
 
 async def baris(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    if chat_id in game_manager.active_games:
-        del game_manager.active_games[chat_id]
+    ended = game_manager.end_game(chat_id)
+    if ended:
         gif_url = "https://media.giphy.com/media/BkKhrTlrf9dqolt80i/giphy.gif"
         await update.message.reply_animation(gif_url, caption="Korkaklar gibi kaçtılar avratlar gibi savaştılar bu yüzden barışı seçtiler.")
     else:
-        await update.message.reply_text("Oyunda aktif grup bulunamadı.")
+        await update.message.reply_text("Aktif oyun bulunamadı.")
 
 async def roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     role_list = ""
@@ -120,6 +124,11 @@ async def callback_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await game_manager.handle_callback(query)
 
+async def is_user_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+    chat = update.effective_chat
+    member = await chat.get_member(user_id)
+    return member.status in ["administrator", "creator"]
+
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -129,12 +138,12 @@ def main():
     app.add_handler(CommandHandler("katil", katil))
     app.add_handler(CommandHandler("baris", baris))
     app.add_handler(CommandHandler("roles", roles))
+
     app.add_handler(CallbackQueryHandler(callback_handler, pattern="^(commands|about)$"))
     app.add_handler(CallbackQueryHandler(callback_game))  # oyun ile ilgili callbackler
 
-    # Bilinmeyen komutları karşılamak için:
-    from telegram.ext import MessageHandler, filters
-    app.add_handler(MessageHandler(filters.COMMAND, unknown))
+    # Bilinmeyen komutlar için, örneğin yanlış yazılan komutlar
+    app.add_handler(CommandHandler("unknown", unknown))
 
     app.run_polling()
 
