@@ -1,13 +1,12 @@
-# (Kodun başı aynı kalıyor...)
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
-)
-import os
 import json
 import logging
 import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+)
 from game_manager import GameManager
+import os
 
 logging.basicConfig(level=logging.INFO)
 
@@ -19,7 +18,7 @@ with open("roles.json", "r", encoding="utf-8") as f:
     ROLES = json.load(f)
 
 game_manager = GameManager()
-join_timers = {}  # chat_id: task
+katilim_zamanlayicilari = {}  # chat_id: task
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -70,10 +69,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         commands_text = (
             "/start : Botu başlatır\n"
             "/savas : Grupta oyunu başlatır\n"
+            "/basla : Oyunu erken başlatır\n"
             "/katil : Oyuna katılır (özelden)\n"
             "/baris : Oyunu sonlandırır\n"
             "/roles : Oyundaki ülkeleri listeler\n"
-            "/basla : Oyunu erkenden başlatır\n"
         )
         await query.edit_message_text(commands_text)
     elif data == "about":
@@ -99,20 +98,22 @@ async def savas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     katil_button = InlineKeyboardMarkup([
         [InlineKeyboardButton("Katıl", url=f"https://t.me/{context.bot.username}?start=join_{chat_id}")]
     ])
+
     await update.message.reply_text(
         f"Oyuna katılmak isteyenler aşağıdaki butona tıklayıp bota başlasın:\n\n"
         f"📍 Grup: {chat_title}\n⏱ Katılım süresi: 2 dakika",
         reply_markup=katil_button
     )
 
-    async def timer_task():
-        for i in range(30, 121, 30):
+    # 2 dakikalık süre başlat, her 30 saniyede bir kalan süre yaz
+    async def zamanlayici():
+        for i in range(4):  # 0, 30, 60, 90 -> 4 kere mesaj at, 120'de biter
+            kalan = 120 - (i * 30)
             await asyncio.sleep(30)
-            if chat_id in game_manager.active_games and not game_manager.active_games[chat_id].started:
-                remaining = 120 - i
-                await context.bot.send_message(chat_id, f"⏳ Oyunun başlamasına {remaining} saniye kaldı...")
+            await context.bot.send_message(chat_id, f"⏳ Kalan süre: {kalan} saniye")
 
-    join_timers[chat_id] = context.application.create_task(timer_task())
+    task = asyncio.create_task(zamanlayici())
+    katilim_zamanlayicilari[chat_id] = task
 
 
 async def basla(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,9 +132,19 @@ async def basla(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("En fazla 20 oyuncu ile oynanabilir.")
         return
 
-    game_manager.assign_roles(chat_id)
+    # Rolleri dağıt
+    success = game_manager.assign_roles(chat_id)
+    if not success:
+        await update.message.reply_text("Roller dağıtılamadı.")
+        return
 
-    # Her oyuncuya DM’den rolünü gönder
+    # Katılım zamanlayıcısını iptal et
+    task = katilim_zamanlayicilari.pop(chat_id, None)
+    if task:
+        task.cancel()
+
+    # Oyunculara rollerini gönder
+    errors = 0
     for uid, pdata in game.players.items():
         role = pdata["role"]
         try:
@@ -142,9 +153,14 @@ async def basla(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=f"🎭 Rolünüz: {role['name']}\n🧠 Gücünüz: {role['power_name']}\n{role['power_desc']}"
             )
         except Exception as e:
-            print(f"Rol mesajı gönderilemedi: {e}")
+            errors += 1
+            print(f"DM gönderilemedi: {e}")
 
-    await update.message.reply_text("Roller dağıtıldı, oyun başladı! 🎲")
+    msg = "🎲 Roller dağıtıldı. Oyunculara özelden gönderildi."
+    if errors > 0:
+        msg += f" {errors} oyuncuya mesaj gönderilemedi."
+
+    await update.message.reply_text(msg)
 
 
 async def katil(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -186,13 +202,15 @@ def main():
     app.add_handler(CommandHandler("savas", savas))
     app.add_handler(CommandHandler("katil", katil))
     app.add_handler(CommandHandler("baris", baris))
-    app.add_handler(CommandHandler("roles", roles))
     app.add_handler(CommandHandler("basla", basla))
+    app.add_handler(CommandHandler("roles", roles))
 
     app.add_handler(CallbackQueryHandler(callback_handler, pattern="^(commands|about)$"))
     app.add_handler(CallbackQueryHandler(callback_game, pattern="^(vote_|power_)"))
 
+    from telegram.ext import MessageHandler, filters
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
+
     app.run_polling()
 
 
