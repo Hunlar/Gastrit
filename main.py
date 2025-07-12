@@ -3,12 +3,14 @@ import logging
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    ContextTypes, MessageHandler, filters
 )
-from game_manager import GameManager
+from game_manager import GameManager  # Ayrı dosyada oyun mekanikleri burada
 import os
 
 logging.basicConfig(level=logging.INFO)
+
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
     raise ValueError("Bot token'ı ortam değişkeni olarak ayarlanmamış! Lütfen TOKEN olarak tanımlayın.")
@@ -17,7 +19,9 @@ with open("roles.json", "r", encoding="utf-8") as f:
     ROLES = json.load(f)
 
 game_manager = GameManager()
-join_timers = {}  # chat_id: task
+
+# Süre takipleri için global dictionary: chat_id -> remaining_seconds
+join_timers = {}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -42,7 +46,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Zaten katıldınız veya oyun başlamış.")
         return
 
-    # Normal /start mesajı
     gif_url = "https://media.giphy.com/media/6qbNRDTBpzmYChvX85/giphy.gif"
     user_name = user.first_name
     start_text = (
@@ -68,10 +71,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "commands":
         commands_text = (
             "/start : Botu başlatır\n"
-            "/savas : Oyunu başlatır (katılım süreci)\n"
-            "/basla : Oyunu erken başlatır (en az 5 kişi)\n"
+            "/savas : Grupta oyunu başlatır\n"
+            "/basla : Oyunu başlatır ve rolleri dağıtır\n"
+            "/katil : Oyuna katılır (özelden)\n"
             "/baris : Oyunu sonlandırır\n"
-            "/roles : Ülkeleri ve güçlerini listeler"
+            "/roles : Oyundaki ülkeleri listeler\n"
         )
         await query.edit_message_text(commands_text)
     elif data == "about":
@@ -104,25 +108,39 @@ async def savas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=katil_button
     )
 
-    # Geri sayım başlat
-    async def countdown():
-        for remaining in [90, 60, 30]:
-            await asyncio.sleep(30)
-            await context.bot.send_message(chat_id, f"⏳ Oyunun başlamasına {remaining} saniye kaldı!")
+    # 2 dakika katılım süresi ve 30 saniyede bir kalan süre bildirimi için async task başlat
+    join_timers[chat_id] = 120
+    asyncio.create_task(join_countdown(chat_id, context))
 
-        players = game_manager.active_games[chat_id].players
-        if 5 <= len(players) <= 20:
-            game_manager.assign_roles(chat_id)
-            for uid in players:
-                role = game_manager.get_player_role(chat_id, uid)
-                if role:
-                    await context.bot.send_message(uid, f"Rolünüz: {role['name']}\nGücünüz: {role['power_desc']}")
-            await context.bot.send_message(chat_id, "🎮 Oyun otomatik başladı! Roller dağıtıldı.")
-        else:
-            del game_manager.active_games[chat_id]
-            await context.bot.send_message(chat_id, "❌ Yeterli oyuncu yok. Oyun iptal edildi.")
 
-    join_timers[chat_id] = asyncio.create_task(countdown())
+async def join_countdown(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
+    while join_timers.get(chat_id, 0) > 0:
+        remaining = join_timers[chat_id]
+        if remaining in [120, 90, 60, 30]:
+            await context.bot.send_message(chat_id, f"Oyuna katılım için kalan süre: {remaining} saniye.")
+        await asyncio.sleep(30)
+        join_timers[chat_id] -= 30
+
+    # Süre dolduğunda
+    if chat_id in join_timers:
+        del join_timers[chat_id]
+
+    game = game_manager.active_games.get(chat_id)
+    if not game:
+        return
+    player_count = len(game.players)
+
+    if player_count < 5:
+        await context.bot.send_message(chat_id, "Katılım süresi doldu fakat minimum 5 oyuncu sağlanamadı. Oyun iptal edildi.")
+        del game_manager.active_games[chat_id]
+        return
+
+    if player_count > 20:
+        await context.bot.send_message(chat_id, "Katılım süresi doldu fakat maksimum 20 oyuncu sınırı aşıldı. Oyun iptal edildi.")
+        del game_manager.active_games[chat_id]
+        return
+
+    await context.bot.send_message(chat_id, f"Katılım süresi doldu. {player_count} oyuncu ile oyun başlatılabilir. Oyunu başlatmak için /basla komutunu kullanın.")
 
 
 async def basla(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -130,28 +148,32 @@ async def basla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     game = game_manager.active_games.get(chat_id)
 
     if not game:
-        await update.message.reply_text("Aktif bir oyun yok.")
+        await update.message.reply_text("Oyun bulunamadı. Önce /savas komutu ile oyun başlatın.")
         return
 
     if game.started:
-        await update.message.reply_text("Oyun zaten başlamış.")
+        await update.message.reply_text("Oyun zaten başladı.")
         return
 
-    players = game.players
-    if not (5 <= len(players) <= 20):
-        await update.message.reply_text("Oyun başlatmak için 5 ile 20 arası oyuncu olmalı.")
+    player_count = len(game.players)
+    if player_count < 5:
+        await update.message.reply_text("Oyuncu sayısı minimum 5 olmalı.")
         return
 
-    if chat_id in join_timers:
-        join_timers[chat_id].cancel()
-        del join_timers[chat_id]
+    if player_count > 20:
+        await update.message.reply_text("Oyuncu sayısı maksimum 20 olmalı.")
+        return
 
-    game_manager.assign_roles(chat_id)
-    for uid in players:
-        role = game_manager.get_player_role(chat_id, uid)
-        if role:
-            await context.bot.send_message(uid, f"Rolünüz: {role['name']}\nGücünüz: {role['power_desc']}")
-    await update.message.reply_text("🎮 Oyun erken başlatıldı! Roller dağıtıldı.")
+    ok = game_manager.assign_roles(chat_id)
+    if not ok:
+        await update.message.reply_text("Roller atanamadı, oyun başlatılamadı.")
+        return
+
+    await update.message.reply_text("Oyun başladı! Roller dağıtıldı. İyi oyunlar!")
+
+
+async def katil(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Oyuna katılmak için gruptaki Katıl butonuna tıklayın.")
 
 
 async def baris(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -164,7 +186,7 @@ async def baris(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption="avrat gibi savaştınız avrat gibi oynadınız barış sağlandı ey kalbi kırık bu grubun evladı bu gün barış diyerek oyunu bitirenler yarın savaş diyecekler. Oyun bitti dağılın"
         )
     else:
-        await update.message.reply_text("Aktif oyun bulunamadı.")
+        await update.message.reply_text("Oyunda aktif grup bulunamadı.")
 
 
 async def roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -172,10 +194,6 @@ async def roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for key, val in ROLES.items():
         role_list += f"• {val['name']}: {val['power_desc']}\n"
     await update.message.reply_text(role_list)
-
-
-async def katil(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Oyuna katılmak için gruptaki Katıl butonuna tıklayın.")
 
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -188,15 +206,19 @@ async def callback_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("savas", savas))
-    app.add_handler(CommandHandler("katil", katil))
+    app.add_handler(CommandHandler("basla", basla))
+    app.add_handler(CommandHandler("katil", katil))  # Hala ekledim uyarı için
     app.add_handler(CommandHandler("baris", baris))
     app.add_handler(CommandHandler("roles", roles))
-    app.add_handler(CommandHandler("basla", basla))
+
     app.add_handler(CallbackQueryHandler(callback_handler, pattern="^(commands|about)$"))
     app.add_handler(CallbackQueryHandler(callback_game, pattern="^(vote_|power_)"))
+
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
+
     app.run_polling()
 
 
