@@ -1,203 +1,230 @@
+import asyncio
 import os
 import json
-import logging
-import asyncio
+import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler,
-    ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
 )
-from game_manager import GameManager
 
-logging.basicConfig(level=logging.INFO)
-
-# --- Token kontrolü ---
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
-    raise ValueError("Bot token'ı ortam değişkeni olarak tanımlanmalı!")
+    raise RuntimeError("TOKEN ortam değişkeni tanımlı değil!")
 
-# --- Roller dosyası ---
-with open("roles.json", "r", encoding="utf-8") as f:
+# Roller
+with open("roles.json", encoding="utf-8") as f:
     ROLES = json.load(f)
 
-game_manager = GameManager()
-katilim_sureleri = {}  # chat_id: asyncio.Task
+class GameManager:
+    def __init__(self):
+        self.active_games = {}  # chat_id: GameData
 
+    class GameData:
+        def __init__(self):
+            self.players = {}  # user_id: {"username", "role", "alive", "power_used"}
+            self.started = False
+            self.joining = False
+            self.round = 0
+            self.votes = {}
+            self.vote_task = None
+            self.join_task = None
+            self.power_phase = False
 
-# --- /start komutu ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    user = update.effective_user
+    def start_game(self, chat_id):
+        if chat_id in self.active_games:
+            return False
+        self.active_games[chat_id] = self.GameData()
+        return True
 
-    # /start join_<chat_id>
-    if args and args[0].startswith("join_"):
-        try:
-            chat_id = int(args[0].split("_")[1])
-        except:
-            await update.message.reply_text("Geçersiz bağlantı.")
-            return
+    def add_player(self, chat_id, user_id, username):
+        game = self.active_games.get(chat_id)
+        if not game or game.started or not game.joining:
+            return False
+        if user_id not in game.players:
+            game.players[user_id] = {
+                "username": username,
+                "role": None,
+                "alive": True,
+                "power_used": False,
+            }
+            return True
+        return False
 
-        added = game_manager.add_player(chat_id, user.id, user.first_name)
-        if added:
+    def can_start(self, chat_id):
+        game = self.active_games.get(chat_id)
+        if not game:
+            return False
+        count = len(game.players)
+        return 5 <= count <= 20
+
+    def assign_roles_and_notify(self, chat_id, bot):
+        game = self.active_games.get(chat_id)
+        if not game:
+            return False
+
+        players = list(game.players.keys())
+        random.shuffle(players)
+        roles_list = list(ROLES.values())
+
+        for i, user_id in enumerate(players):
+            role = roles_list[i % len(roles_list)]
+            game.players[user_id]["role"] = role
+            game.players[user_id]["power_used"] = False
+
+        game.started = True
+        game.joining = False
+        game.round = 1
+        game.power_phase = False
+
+        for user_id in players:
+            role = game.players[user_id]["role"]
+            keyboard = [
+                [InlineKeyboardButton("Gücümü Kullan", callback_data="use_power")]
+            ]
+            markup = InlineKeyboardMarkup(keyboard)
+            text = (
+                f"🎭 Rolünüz: {role['name']}\n"
+                f"💥 Gücünüz: {role.get('power', 'Yok')}"
+            )
             try:
-                await context.bot.send_message(chat_id, f"{user.first_name} oyuna katıldı!")
-            except:
-                pass
-            await update.message.reply_text("Katıldınız! Oyun yakında başlayacak.")
-        else:
-            await update.message.reply_text("Zaten katıldınız veya oyun başladı.")
-        return
+                bot.send_message(user_id, text=text, reply_markup=markup)
+            except Exception as e:
+                print(f"Özel mesaj gönderilemedi {user_id}: {e}")
 
-    # Normal start
-    gif = "https://media.giphy.com/media/6qbNRDTBpzmYChvX85/giphy.gif"
-    text = (
-        f"Son bir Savaş istiyorum senden yeğen son bir savaş git onlara söyle olur mu, {user.first_name}.\n"
-        "Eğlenceye katılmak için grubunuzdaki Katıl butonuna tıklayın!"
-    )
+        asyncio.create_task(bot.send_message(chat_id, f"Oyun başladı! {len(players)} oyuncu katıldı. İlk tur başladı."))
+        return True
+
+    def alive_players(self, chat_id):
+        game = self.active_games.get(chat_id)
+        if not game:
+            return []
+        return [uid for uid, p in game.players.items() if p["alive"]]
+
+    def eliminate_player(self, chat_id, user_id):
+        game = self.active_games.get(chat_id)
+        if not game:
+            return False
+        if user_id in game.players:
+            game.players[user_id]["alive"] = False
+            return True
+        return False
+
+    def stop_game(self, chat_id):
+        if chat_id in self.active_games:
+            del self.active_games[chat_id]
+            from telegram.ext import CommandHandler, CallbackQueryHandler
+
+game_manager = GameManager()
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Komutlar", callback_data="commands")],
-        [InlineKeyboardButton("Oyun Hakkında", callback_data="about")],
+        [InlineKeyboardButton("Oyun Hakkında", callback_data="about")]
     ]
-    await update.message.reply_animation(gif, caption=text, reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-# --- /savas komutu ---
-async def savas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type not in ["group", "supergroup"]:
-        await update.message.reply_text("Bu komut sadece gruplarda.")
-        return
-
-    chat_id = update.effective_chat.id
-    if not game_manager.start_game(chat_id):
-        await update.message.reply_text("Zaten aktif bir oyun var.")
-        return
-
-    katil_buton = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Katıl", url=f"https://t.me/{context.bot.username}?start=join_{chat_id}")]
-    ])
+    markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "Oyun başlıyor!\n⏳ Katılım süresi: 2 dakika\nEn az 5, en fazla 20 kişi.",
-        reply_markup=katil_buton
+        "🎮 Ülke Savaşlarına Hoş Geldin!\nKatılmak için /katil yazabilirsin.",
+        reply_markup=markup
     )
 
-    async def zamanlayici():
-        for kalan in [90, 60, 30]:
-            await asyncio.sleep(30)
-            await context.bot.send_message(chat_id, f"⏳ Oyunun başlamasına {kalan} saniye kaldı!")
-        await baslat_oyun(chat_id, context)
+async def katil(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    joined = game_manager.add_player(chat_id, user.id, user.first_name)
 
-    katilim_sureleri[chat_id] = asyncio.create_task(zamanlayici())
+    if joined:
+        await context.bot.send_message(chat_id, f"✅ {user.first_name} oyuna katıldı.")
+    else:
+        await update.message.reply_text("❗ Katılamadınız. Oyun başlamış olabilir veya zaten katıldınız.")
 
-
-# --- Oyun Başlatıcı ---
-async def baslat_oyun(chat_id, context):
-    players = game_manager.active_games.get(chat_id).players
-    if not players or len(players) < 5:
-        await context.bot.send_message(chat_id, "Yeterli oyuncu yok. Oyun iptal edildi.")
-        del game_manager.active_games[chat_id]
+async def savas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    started = game_manager.start_game(chat_id)
+    if not started:
+        await update.message.reply_text("❗ Oyun zaten başlatılmış.")
         return
 
-    game_manager.assign_roles(chat_id)
+    game = game_manager.active_games[chat_id]
+    game.joining = True
+    await update.message.reply_text("🎮 Katılım başladı! Katılmak için /katil yazın. 2 dakika süreniz var...")
 
-    for user_id, pdata in players.items():
-        role = pdata["role"]
-        try:
-            msg = f"🎖 Rolünüz: {role['name']}\n🧠 Gücünüz: {role['power_name']}\n🔮 Açıklama: {role['power_desc']}"
-            gif = role.get("gif", "")
-            await context.bot.send_message(chat_id=user_id, text=msg)
-            if gif:
-                await context.bot.send_animation(chat_id=user_id, animation=gif)
-        except Exception as e:
-            print(f"PM gönderilemedi: {e}")
+    async def countdown():
+        for remaining in [90, 60, 30]:
+            await asyncio.sleep(30)
+            await context.bot.send_message(chat_id, f"⏳ Kalan süre: {remaining} saniye")
+        await asyncio.sleep(30)
+        await basla(update, context, from_timer=True)
 
-    await context.bot.send_message(chat_id, "🎮 Roller dağıtıldı! Oyun başladı!")
+    game.join_task = asyncio.create_task(countdown())
 
-
-# --- /basla komutu ---
-async def basla(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def basla(update: Update, context: ContextTypes.DEFAULT_TYPE, from_timer=False):
     chat_id = update.effective_chat.id
-    if chat_id in katilim_sureleri:
-        katilim_sureleri[chat_id].cancel()
-        del katilim_sureleri[chat_id]
-    await baslat_oyun(chat_id, context)
+    game = game_manager.active_games.get(chat_id)
 
+    if not game:
+        await update.message.reply_text("Oyun bulunamadı.")
+        return
 
-# --- /baris komutu ---
+    if not game_manager.can_start(chat_id):
+        await update.message.reply_text("❗ En az 5, en fazla 20 oyuncu ile başlayabilirsiniz.")
+        return
+
+    # Katılımı durdur ve rolleri ata
+    success = game_manager.assign_roles_and_notify(chat_id, context.bot)
+    if success:
+        await context.bot.send_message(chat_id, "🎲 Roller dağıtıldı. Oyun başladı.")
+        await game_manager._power_phase_timeout(chat_id, context)
+
 async def baris(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    if chat_id in game_manager.active_games:
-        del game_manager.active_games[chat_id]
-        gif = "https://media.giphy.com/media/BkKhrTlrf9dqolt80i/giphy.gif"
-        await update.message.reply_animation(
-            gif,
-            caption="Avrat gibi savaştınız, avrat gibi oynadınız. Bu gün barış diyenler, yarın savaş diyecek. Oyun bitti, dağılın."
-        )
-    else:
-        await update.message.reply_text("Aktif bir oyun yok.")
+    game_manager.stop_game(chat_id)
+    await update.message.reply_text("🕊️ Oyun sonlandırıldı.\nhttps://media.giphy.com/media/3orieZZRe4UoRzZWUE/giphy.gif")
 
+async def komutlar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("""📜 Komutlar:
+/start – Başlat
+/katil – Katıl
+/savas – Oyunu başlat
+/basla – Süreyi beklemeden başlat
+/baris – Oyunu bitir
+/roller – Roller listesi""")
 
-# --- /katil komutu ---
-async def katil(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Oyuna katılmak için gruptaki 'Katıl' butonunu kullanın.")
-
-
-# --- /roles komutu ---
-async def roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = ""
-    for role in ROLES.values():
-        msg += f"• {role['name']}: {role['power_desc']}\n"
+async def roller(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = "🎭 Roller:\n"
+    for role in ROLES:
+        msg += f"- {role['name']}: {role['power']}\n"
     await update.message.reply_text(msg)
 
-
-# --- Butonlar ---
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = update.callback_query.data
-    await update.callback_query.answer()
+    query = update.callback_query
+    data = query.data
 
     if data == "commands":
-        await update.callback_query.edit_message_text(
-            "/start - Botu başlat\n"
-            "/savas - Oyunu başlatır\n"
-            "/katil - Katılım için bilgi\n"
-            "/baris - Oyunu bitirir\n"
-            "/roles - Ülke rolleri\n"
-            "/basla - Oyunu erkenden başlat"
-        )
+        await query.answer()
+        await query.message.edit_text("📜 Komutlar:\n/start, /katil, /savas, /basla, /baris, /roller")
     elif data == "about":
-        await update.callback_query.edit_message_text(
-            "Oyunumuz, Zeyd A.I. tarafından geliştirilmiş bir savaş simülasyon botudur. "
-            "Strateji, eğlence ve diplomasi bu oyunda birleşti!"
-        )
+        await query.answer()
+        await query.message.edit_text("🧠 Oyunumuz Zeyd AI ile düzenlenmiş bir savaş simülasyon botudur.")
+    else:
+        await game_manager.handle_callback(update, context)
 
-
-# --- Callback Vote/Power ---
-async def callback_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await game_manager.handle_callback(update, context)
-
-
-# --- Bilinmeyen komutlar ---
-async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bilinmeyen komut. Lütfen /start yazın.")
-
-
-# --- MAIN ---
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("katil", katil))
     app.add_handler(CommandHandler("savas", savas))
     app.add_handler(CommandHandler("basla", basla))
     app.add_handler(CommandHandler("baris", baris))
-    app.add_handler(CommandHandler("katil", katil))
-    app.add_handler(CommandHandler("roles", roles))
+    app.add_handler(CommandHandler("komutlar", komutlar))
+    app.add_handler(CommandHandler("roller", roller))
+    app.add_handler(CallbackQueryHandler(callback_handler))
 
-    app.add_handler(CallbackQueryHandler(callback_handler, pattern="^(commands|about)$"))
-    app.add_handler(CallbackQueryHandler(callback_game, pattern="^(vote_|power_)"))
-
-    app.add_handler(MessageHandler(filters.COMMAND, unknown))
-
+    print("Bot çalışıyor...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
