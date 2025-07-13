@@ -124,7 +124,7 @@ async def savas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [[InlineKeyboardButton("Katıl", url=f"https://t.me/Zeydoyunbot?start=join_{chat_id}")]]
     )
 
-    gif_join = "https://media4.giphy.com/media/v1.Y2lkPTZjMDliOTUycmhlM2FmNm55cDVzNmdwOW4xNGRocmNpamRhaXI3cmF3M2RuOXFqYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/14p5u4rpoC9Rm0/giphy.gif"
+    gif_join = "https://media4.giphy.com/media/14p5u4rpoC9Rm0/giphy.gif"
     await context.bot.send_animation(chat_id=chat_id, animation=gif_join)
     await context.bot.send_message(
         chat_id=chat_id,
@@ -138,7 +138,9 @@ async def katil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Oyuna katılmak için grupta /savas komutu ile katılım başlatılmalıdır."
     )
-    async def send_vote_buttons(user_id, game, context):
+
+
+async def send_vote_buttons(user_id, game, context):
     buttons = []
     for pid, pdata in game["players"].items():
         role_name = pdata["role"]["name"]
@@ -212,14 +214,34 @@ async def use_power(chat_id, context):
     players_list = list(game["players"].items())
     random.shuffle(players_list)
 
+    messages = {
+        "Osmanlı İmparatorluğu": "Osmanlı Germen İmparatorluğunu bok gibi oyunun dışına fırlattı!",
+        "German İmparatorluğu": "Germen İmparatorluğu Britanya'yı bir karışıklığa soktu!",
+        "Britanya İmparatorluğu": "Britanya İmparatorluğu Rusya'nın oyununu manipüle etti!",
+        "Pembe Dünya": "Pembe Dünya herkese meydan okudu!",
+        "Rusya Federasyonu": "Rusya Federasyonu ABD'nin oy kullanmasını engelledi!",
+        "ABD": "ABD bir ülkeyi dokunulmaz yaptı!",
+        "Fransa": "Fransa oyları iki kat saydırdı!",
+        "Çin": "Çin oylama sonuçlarını tersine çevirdi!",
+        "İran": "İran gizli oy kullandı!",
+        "İsrail": "İsrail iki kişiye oy verdi!",
+        "Türkiye": "Türkiye herkesi ifşa etti!",
+        "Kuzey Kore": "Kuzey Kore görünmez oldu!",
+        "Japonya": "Japonya rastgele bir gücü kopyaladı!",
+        "Hindistan": "Hindistan bir ülkenin gücünü engelledi!",
+        "Meksika": "Meksika elenen ülkeyi geri döndürdü!",
+        "İtalya": "İtalya aynı hedefe iki oy verdi!",
+        "Brezilya": "Brezilya koruma sağladı!",
+        "Ukrayna": "Ukrayna kimlerin hangi ülke olduğunu açığa çıkardı!",
+    }
+
     for user_id, pdata in players_list:
         if len(used_powers) >= powers_available:
             break
         role = pdata.get("role")
         if role and role["name"] not in used_powers:
             used_powers.append(role["name"])
-            # Mesaj örnekleri
-            message = f"{role['name']} özel gücünü kullandı! (Burada mizahi bir mesaj olabilir)"
+            message = messages.get(role["name"], f"{role['name']} özel gücünü kullandı!")
             await context.bot.send_animation(chat_id=chat_id, animation=role["gif"])
             await context.bot.send_message(chat_id=chat_id, text=message)
 
@@ -253,7 +275,9 @@ async def start_round(chat_id, context):
         await context.bot.send_message(chat_id, "📢 Hiç oyuncu elenemedi.")
 
     await asyncio.sleep(5)
-    async def basla(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+
+async def basla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id not in games or not games[chat_id].get("joining"):
         await update.message.reply_text("Henüz katılım başlamadı.")
@@ -280,7 +304,7 @@ async def start_round(chat_id, context):
     game["started"] = True
     game["joining"] = False
 
-    await context.bot.send_animation(chat_id=chat_id, animation="https://media4.giphy.com/media/v1.Y2lkPTZjMDliOTUycmhlM2FmNm55cDVzNmdwOW4xNGRocmNpamRhaXI3cmF3M2RuOXFqYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/14p5u4rpoC9Rm0/giphy.gif")
+    await context.bot.send_animation(chat_id=chat_id, animation="https://media4.giphy.com/media/14p5u4rpoC9Rm0/giphy.gif")
     await context.bot.send_message(chat_id=chat_id, text=f"🎮 Oyun başladı! Toplam {len(player_ids)} oyuncu var.")
 
     for user_id in player_ids:
@@ -307,7 +331,7 @@ async def baris(update: Update, context: ContextTypes.DEFAULT_TYPE):
     games.pop(chat_id)
 
     text = "Korkaklar gibi kaçtılar avratlar gibi savaştılar bu yüzden barışı seçtiler"
-    gif = "https://media1.giphy.com/media/v1.Y2lkPTZjMDliOTUya2NuNXY3YXk5dnhjZW9kcHF3MjE4eDl4emI5MGZqNzlqdWV0YjlndSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/BkKhrTlrf9dqolt80i/giphy.gif"
+    gif = "https://media1.giphy.com/media/BkKhrTlrf9dqolt80i/giphy.gif"
 
     await context.bot.send_animation(chat_id=chat_id, animation=gif)
     await context.bot.send_message(chat_id=chat_id, text=text)
